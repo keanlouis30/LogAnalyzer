@@ -173,7 +173,44 @@ The project is executed in a modular, sequenced pipeline that validates each lay
 
 ---
 
-## 11. Conclusion
+## 11. Competitive Landscape & Differentiation
+
+The intersection of AI and SIEM is an active and rapidly maturing space. Understanding what already exists — and where this proposal sits relative to it — is essential for justifying the build decision.
+
+### What Already Exists
+
+**Wazuh's Native LLM Integration:** Wazuh itself has begun moving in this direction, introducing LLM integration using models like LLaMA 3 running on Ollama combined with LangChain. This allows analysts to query logs using natural language through a chatbot embedded in the OpenSearch UI and receive context-rich responses.
+
+**Enterprise SIEM AI Assistants:** Vendors including Fortinet (Fortinet Advisor), Rapid7, Elastic, and Microsoft Sentinel have embedded AI assistants directly into their platforms. These provide alert triage, investigation summaries, and workflow recommendations. They are cloud-connected, subscription-priced, and built for their own proprietary platforms.
+
+**Open Source Tools:** Projects like LogSentinelAI offer LLM-powered log analysis using declarative extraction schemas, with support for Elasticsearch/Kibana integration and local inference via Ollama and vLLM. These are pipeline tools, not workflow-integrated analyst aids.
+
+### Where This Proposal Is Different
+
+Despite the crowded space, no existing solution matches this proposal's specific combination of properties. The differentiators are not marginal — they represent a fundamentally different design philosophy.
+
+| Dimension | Existing Solutions | This Proposal |
+| :--- | :--- | :--- |
+| **Workflow Integration** | Chatbot panels or separate tools requiring the analyst to switch context and type natural language queries | Captures the analyst's existing Wazuh filter state with one click — zero behavior change required |
+| **Privacy Architecture** | Cloud-connected AI (enterprise vendors) or opt-in local setup requiring significant infrastructure work (Wazuh native) | Self-hosted by design, hard architectural constraint from day one, not a configuration option |
+| **Interaction Model** | Query-based: analyst must formulate a question | Filter-based: analyst works natively in Wazuh, the tool translates their filter state automatically |
+| **Deployment Model** | Native platform feature (vendor lock-in) or standalone pipeline tool | Lightweight browser extension layered on top of any existing Wazuh deployment without modifying it |
+| **Target User** | Assumes analyst proficiency with AI prompting | Designed explicitly for Level 1 analysts who should not need to know how to prompt an LLM |
+| **Cost Model** | Per-seat SaaS subscription or significant self-hosted infrastructure investment | Fixed hardware cost, zero per-investigation cost at scale |
+
+### The Core Differentiator
+
+The most significant gap this proposal fills is the **interaction model**. Every existing solution — including Wazuh's own native AI — requires the analyst to formulate a question. This places the cognitive burden of knowing *what to ask* on the analyst, which is circular: if the analyst already knows what to ask, they already have enough context to begin the investigation.
+
+This proposal inverts that model entirely. The analyst filters first — the thing they already know how to do — and the AI derives the question automatically from the filter state. The result is an AI assist that is genuinely useful to the analysts who need it most: those who are still building the pattern recognition to know where to look.
+
+### Market Window
+
+The space is consolidating quickly. Wazuh's native AI features, while currently requiring significant setup effort and relying on a query-based interaction model, will mature. The addressable window for a workflow-native, zero-friction alternative is estimated at 12–18 months before native platform features close the gap sufficiently to reduce the marginal value of a standalone tool. This makes early execution on Phase 1 and Phase 2 a strategic priority.
+
+---
+
+## 12. Conclusion
 
 This architecture represents a practical, privacy-respecting augmentation of how Level 1 and Level 2 SOC analysts orient themselves within large datasets. By being explicit about what the tool is — an AI-powered starting point, not an AI-powered verdict — we avoid the most common failure mode of security AI tooling: eroding analyst judgment rather than sharpening it.
 
