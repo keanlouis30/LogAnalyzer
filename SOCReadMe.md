@@ -26,11 +26,11 @@ While cloud-based Large Language Models (LLMs) like GPT-4 or Claude could theore
 
 ## 2. The Proposed Solution
 
-We propose building a proprietary, assistive AI pipeline tailored explicitly for Wazuh.
+We propose building a proprietary, assistive AI pipeline tailored explicitly for Wazuh, with initial support for the Wazuh dashboard. Support for Kibana and OpenSearch dashboards will be added in subsequent development phases as the URL parameter parsing layer is extended.
 
-The core of the user experience is a **browser extension** that acts as an overlay on the Wazuh dashboard. Analysts use the native Wazuh/OpenSearch filters they already know. Once they isolate a suspicious timeframe and apply their filters, they click a "Capture" button in the extension.
+The core of the user experience is a **browser extension** that acts as an overlay on the Wazuh dashboard. Analysts use the native Wazuh filters they already know. Once they isolate a suspicious timeframe and apply their filters, they click a **Capture** button in the extension.
 
-Behind the scenes, the extension captures the query parameters and sends them to a secure, self-hosted backend server. This server dynamically queries the Wazuh API, downloads the relevant JSON logs, aggressively pre-processes them, and feeds them into a dedicated SLM hosted on internal company hardware. Within seconds, a correlated incident summary is streamed back to the analyst's browser as a **suggested narrative** — clearly framed as a starting orientation, not a definitive finding.
+Behind the scenes, the extension captures the active URL — including all filter parameters and the selected time range — and sends it to a secure, self-hosted backend server. This server parses the URL parameters, queries the Wazuh API directly using those parameters, downloads the relevant JSON logs, aggressively pre-processes them, and feeds them into a dedicated SLM hosted on internal company hardware. The SLM returns a structured report written in Markdown, displayed directly in the extension and expandable to a full browser tab.
 
 ---
 
@@ -38,31 +38,91 @@ Behind the scenes, the extension captures the query parameters and sends them to
 
 This distinction is fundamental to how the tool is built, deployed, and used.
 
-The AI summary is explicitly framed in the UI as a **"Suggested Starting Point"**. The summary will:
+The AI report is explicitly framed as a **"Suggested Starting Point"**. The report will:
 
-- Highlight the most statistically anomalous events in the filtered dataset
-- Surface potential correlations between events for the analyst to verify
-- Call out relevant IoCs (IPs, hashes, usernames) worth investigating first
-- Clearly indicate its own confidence level and flag ambiguous patterns
+- Provide a hypothesis of what likely occurred based on the log evidence
+- Surface the actual findings derived from the log data
+- Propose generic remediation steps as a reference, not a prescription
+- Display a per-section confidence score derived from token-level log probabilities — not from the model's self-assessment
 
-The summary will never:
+The report will never:
 
 - Declare an incident confirmed or closed
-- Recommend remediation actions autonomously
-- Be logged or used as the sole basis for any security decision
+- Recommend remediation actions autonomously or with authority
+- Be used as the sole basis for any security decision
 
-Every summary ends with a consistent footer: *"This summary is AI-generated and requires analyst verification before any action is taken."*
+Every report ends with a consistent footer: *"This report is AI-generated from filtered Wazuh telemetry and requires analyst verification before any action is taken."*
 
 **SOC SOP integration:** Onboarding documentation will explicitly train analysts — particularly Level 1 — to treat the AI output the way they would treat a brief from a junior colleague: useful orientation, not gospel. Verification against raw logs is always the required next step.
 
 ---
 
-## 4. The Strategic Value & ROI
+## 4. Report Structure
+
+The SLM produces a structured Markdown report with three defined sections. Using Markdown as the output format minimizes token consumption, constrains the model's output shape to reduce hallucination risk, and renders identically to a formatted document in the extension's built-in viewer.
+
+Each section carries a **confidence score** badge derived from the mean log probability of the tokens generated in that section. This score reflects the mathematical certainty of the model's output — not the model's self-reported confidence, which is itself subject to hallucination. A low confidence score on any section is a direct signal to the analyst to treat that section with additional skepticism and verify carefully against raw logs.
+
+### Section 1: Hypothesis
+*Confidence score displayed as a badge on the section header.*
+
+The SLM's best reconstruction of what likely happened based on the log evidence. Written as "here is what we think occurred" — descriptive, not prescriptive. The hypothesis does not tell the analyst what to investigate next; it tells them what the data appears to suggest so they can evaluate it critically. The language is deliberately hedged: "the logs are consistent with," "this pattern may indicate," "a possible explanation is."
+
+### Section 2: Actual Findings
+*Confidence score displayed as a badge on the section header.*
+
+A structured presentation of what the logs concretely show: specific events, timestamps, source and destination IPs, affected accounts, rule IDs triggered, and observed sequences. This section stays close to the data — less inference, more extraction. It is the evidentiary layer that either supports or complicates the hypothesis.
+
+### Section 3: Proposed Remediation
+*Confidence score displayed as a badge on the section header.*
+
+Generic best-practice remediation steps relevant to the finding type identified. These are reference suggestions — block the IP, rotate the credentials, patch the service — not environment-specific prescriptions. The section is explicitly labeled as proposed and generic. Environment-specific remediation remains the analyst's responsibility.
+
+---
+
+## 5. Confidence Scoring via Token Log Probabilities
+
+The confidence score is a first-class feature of both this tool and the Pentest Report Generator. It is documented here in full as the canonical reference.
+
+### Why Logprobs, Not Self-Assessment
+
+Asking the SLM to rate its own confidence produces a number that is itself generated by the same model that may be hallucinating. It is unreliable by design. Token log probabilities are a mathematical property of the model's output — the probability distribution the model assigned to each token it generated. High mean logprob across a section means the model generated those tokens with high certainty. Low mean logprob means the model was uncertain, hedging between multiple possible continuations. This is an honest signal that does not depend on the model's self-awareness.
+
+### Computation Method
+
+1. The backend requests logprobs alongside the generated text from the inference engine.
+2. For each generated section (Hypothesis, Findings, Remediation), the mean log probability of all tokens in that section is computed.
+3. The mean logprob is converted to a 0–100 confidence score using a calibrated scaling function.
+4. The score is passed back to the extension alongside the report text and displayed as a color-coded badge on each section header.
+
+**Score interpretation:**
+
+| Score Range | Badge Color | Analyst Guidance |
+| :--- | :--- | :--- |
+| 80–100 | Green | Model generated this section with high token certainty. Standard verification applies. |
+| 50–79 | Yellow | Model showed meaningful uncertainty. Treat as a starting hypothesis only. |
+| 0–49 | Red | Model was significantly uncertain. This section requires close manual verification before any reliance. |
+
+### Inference Engine Requirement
+
+Logprob support is a **hard requirement** for SLM inference engine selection. The exact model is undecided pending evaluation, but any candidate inference engine must expose per-token log probabilities in its API response. vLLM is the leading candidate as it exposes logprobs cleanly, supports most open model architectures, and is production-grade for self-hosted deployments. This requirement must be validated against any alternative inference engine before it is adopted.
+
+### Purpose of the Confidence Score
+
+The confidence score serves three audiences:
+
+- **The SOC analyst:** Immediate signal on which sections to scrutinize most carefully before acting.
+- **The tool developer:** Empirical data on where the model performs well and where it degrades, informing fine-tuning priorities.
+- **Compliance documentation:** Evidence that AI-assisted findings were evaluated with awareness of model uncertainty, supporting the assistive-not-authoritative classification.
+
+---
+
+## 6. The Strategic Value & ROI
 
 - **Absolute Data Privacy:** The SLM is hosted entirely on internal infrastructure. Data never leaves the company network, ensuring total compliance and zero risk of telemetry leakage.
 - **Zero Learning Curve (High Adoption):** The tool eliminates prompt engineering. Analysts do what they do best — filter data natively in Wazuh — and the system translates those filters into the AI's context. It supercharges an existing workflow rather than forcing a new one.
 - **Fixed Operational Cost:** By utilizing an SLM rather than commercial APIs, the computational cost is fixed to the hardware. Whether the SOC runs 10 investigations a day or 10,000, the per-investigation cost after initial hardware procurement is effectively zero.
-- **Reduction in Analyst Orientation Time:** What currently requires 20 to 40 minutes of manual log triage to understand *where to begin* can be reduced to a 10 to 30-second AI-generated orientation, allowing analysts to spend their cognitive energy on the verification and remediation work that actually requires human judgment.
+- **Reduction in Analyst Orientation Time:** What currently requires 20 to 40 minutes of manual log triage to understand where to begin can be reduced to a 10 to 30-second AI-generated orientation, allowing analysts to spend their cognitive energy on the verification and remediation work that actually requires human judgment.
 
 ### Hardware Cost Transparency
 
@@ -70,148 +130,129 @@ This proposal acknowledges upfront that the fixed-cost model requires an initial
 
 ---
 
-## 5. Architectural Blueprint
+## 7. Architectural Blueprint
 
-To handle potentially millions of JSON logs without impacting the analyst's browser, the architecture uses a "thin client, heavy backend" approach.
+To handle potentially millions of JSON logs without impacting the analyst's browser, the architecture uses a thin client, heavy backend approach.
 
 ### Step 1: The UI Trigger (Browser Extension)
 
-- **Mechanism:** The extension does *not* read raw logs rendering on the DOM.
-- **Action:** It silently captures the page state — specifically the OpenSearch query parameters, applied filters, and the selected time range.
-- **Handoff:** It transmits these lightweight parameters to the internal backend server over a mutually authenticated internal HTTPS connection.
+The analyst applies their filters natively in the Wazuh dashboard — time range, agent, rule ID, severity, or any combination. Once satisfied with the filter state, they click **Capture** in the extension overlay.
 
-**Extension Security Posture:** Because this tool operates exclusively within the internal network, its external attack surface is minimal. However, the following hardening measures are applied:
+The extension does not read raw logs from the DOM. It captures the active page URL, which encodes all applied filter parameters and the selected time range as query parameters. These lightweight parameters are transmitted to the internal backend server over a mutually authenticated internal HTTPS connection.
 
-- The extension communicates only with the pre-configured internal backend endpoint; no external domains are whitelisted
-- Enterprise browser policy controls (Chrome/Edge managed deployment) are used to lock the extension to approved workstations, preventing personal browser installation
-- The extension requests only the minimum browser permissions required: access to the Wazuh dashboard tab URL and the ability to make internal network requests
-- Cross-browser compatibility is scoped to the SOC's standardized browser during initial rollout, with expansion evaluated post-stabilization
+**Platform support:** The prototype supports the Wazuh dashboard URL parameter structure. Kibana and OpenSearch dashboard support will be added in a subsequent development phase as the URL parsing layer is extended to handle their respective parameter schemas.
 
-### Step 2: The Orchestrator & Data Pipeline (Backend Server)
+**Extension Security Posture:** The extension operates exclusively within the internal network. Hardening measures include read-only DOM permissions, no external network calls, all communication routed through the internal backend only, and enterprise browser policy deployment to prevent unauthorized installation.
 
-- **Data Fetching:** The backend server (built in Go or Python for high concurrency) connects directly to the Wazuh Indexer API, executes the analyst's exact query, and downloads the raw JSON logs securely.
-- **Credential Management:** Wazuh API credentials used by the backend service are stored in an internal secrets manager (e.g., HashiCorp Vault or equivalent), rotated on a defined schedule, and scoped to read-only access on the relevant index patterns. The service account has no write permissions.
-- **Audit Logging:** Every query made through the backend service is logged — including which analyst triggered it, what filters were applied, and what time range was queried. This creates a full audit trail of AI-assisted investigations for compliance and internal review purposes.
-- **Access Control:** The backend service is accessible only from analyst workstations on the SOC network segment. Access is enforced at the network layer via firewall rules and at the application layer via internal mTLS client certificates.
+### Step 2: Backend Query and Pre-Processing
 
-**Pre-Processing (Critical Step):** SLMs have limited context windows. The backend script parses the JSON logs, strips empty or irrelevant fields, and aggregates repetitive events. For example, 5,000 identical SSH failure logs become a single line: `[5,000 failed SSH logins from IP 192.168.1.50 between 14:00–14:05]`. This reduces data payload by up to 90% on noisy, high-repetition datasets.
+The backend service receives the URL parameters, parses them into a structured Wazuh API query, and retrieves the relevant log events for the specified time window and filter criteria.
 
-**Important caveat:** Aggressive aggregation is tuned carefully. For investigation scopes involving low-and-slow adversary behavior — where each unique event is forensically significant — the aggregation thresholds are set conservatively, preserving granularity over compression. The aggregation logic is configurable per investigation type.
+Pre-processing is applied before any data reaches the SLM:
 
-### Step 3: The Intelligence Engine (Self-Hosted SLM)
+- Remove duplicate events — identical rule triggers within short time windows are collapsed into a single representative event with a count annotation
+- Strip fields irrelevant to security analysis (rendering metadata, UI state fields, internal Wazuh housekeeping)
+- Preserve forensically critical fields unconditionally: timestamps, source and destination IPs, rule IDs, severity levels, agent names, usernames, file paths, process names
+- Structure the cleaned event stream as an ordered timeline
 
-- **The Model:** A Small Language Model (7B–8B parameters, or larger if hardware supports) receives the dense, pre-processed context and generates a narrative summary.
-- **Why an SLM?:** Security log correlation is a narrow, structured task focused on pattern recognition, timeline reconstruction, and anomaly flagging. An SLM appropriately sized for this task — summarizing pre-processed, structured data rather than performing open-ended reasoning — is well-suited to the assistive use case described in this proposal.
-- **Inference Engine:** The model is served via vLLM or a comparable optimized inference engine on the internal GPU server, providing low-latency token generation.
-- **Model Limitations — Acknowledged:** Current SLMs at the 7B–8B parameter range can produce plausible-sounding but inaccurate correlations. This is accepted and mitigated through the assistive framing described in Section 3. The tool's value is in reducing orientation time, not in being infallible.
+**Note on pre-processing logic:** The pre-processing pipeline is shared between the Log Analyzer and the Pentest Report Generator in the initial implementation. As both tools mature and their use cases diverge, the pre-processing layer will be forked and tuned independently — incident investigation and penetration testing produce different noise patterns that benefit from different deduplication and retention strategies.
 
-### Step 4: The Delivery
+### Step 3: SLM Report Generation
 
-The SLM processes the pre-processed timeline, identifies potential correlations (e.g., *a brute-force sequence followed by a successful login and a subsequent file integrity change in /etc/shadow*), and streams the human-readable summary back to the browser extension. The summary is clearly labeled as AI-generated and includes a direct link to the relevant raw log view in Wazuh for immediate analyst verification.
+The pre-processed event timeline is passed to the SLM with a structured prompt and a rigid Markdown template skeleton. The skeleton defines the three report sections and their expected content, constraining the model's output shape and preventing it from generating unsolicited sections or reordering findings.
 
----
+The SLM generates the report in Markdown. Logprobs are requested alongside the generated tokens. The backend computes per-section confidence scores from the logprob data and appends them to the report as metadata.
 
-## 6. System Dynamics & Realistic Performance Estimates
+### Step 4: Report Delivery and Display
 
-The following estimates assume a standard enterprise internal network, a single high-end GPU for SLM inference, and the pre-processing pipeline operating at full efficiency. These are targets informed by benchmark data, not guarantees. Actual performance will be validated during Phase 2 load testing.
+The completed Markdown report and confidence score metadata are returned to the extension. The extension renders the report inline using its built-in Markdown viewer, with confidence score badges displayed on each section header.
 
-| Investigation Scope | Estimated Log Volume | Estimated End-to-End Time | Notes |
-| :--- | :--- | :--- | :--- |
-| **Targeted Event** | 10,000–50,000 logs | ~5–10 seconds | Feels nearly instantaneous. |
-| **Complex Subnet Sweep** | 100,000–300,000 logs | ~15–25 seconds | Short wait, fluid workflow. |
-| **Massive Incident** | 1,000,000+ logs | ~45–90 seconds | A loading state is shown; saves hours of manual triage. JSON parsing and I/O at this scale is the primary bottleneck, not model inference. |
+The analyst can expand the report to a full browser tab for comfortable reading and review. From the full tab view, the report can be downloaded in three formats:
 
-Performance benchmarks will be measured formally during Phase 2 and Phase 3 and used to set accurate analyst expectations prior to SOC rollout.
+- **Markdown (.md)** — the native output format, suitable for version control and further editing
+- **PDF** — for formal documentation and sharing
+- **DOCX** — for integration into existing Word-based reporting workflows
 
 ---
 
-## 7. Failure Modes & Resilience
+## 8. Edge Cases and Failure Modes
 
-A production security tool must define its behavior when things go wrong.
-
-| Failure Scenario | System Behavior |
+| Scenario | Handling |
 | :--- | :--- |
-| **SLM server is offline** | Backend returns a clear error state to the extension. The analyst is notified immediately and continues investigation manually without degraded Wazuh functionality. |
-| **Context window exceeded** | Backend detects oversized payload before submission and either further aggregates, truncates with a visible warning, or splits into sequential summaries. Analyst is informed of the truncation. |
-| **Pre-processing drops unexpected fields** | Configurable field preservation list ensures forensically critical fields (timestamps, source IPs, rule IDs, user accounts) are never stripped regardless of aggregation settings. |
+| **URL parameters cannot be parsed** | Extension displays an error state. Analyst is prompted to verify their filter state and retry. No partial query is sent. |
+| **Wazuh API returns zero events for the filter window** | Backend returns a no-data response. Extension displays a clear message: "No log events found for the selected filter. Adjust the time range or filters and retry." |
+| **Pre-processing drops unexpected fields** | Configurable field preservation list ensures forensically critical fields are never stripped regardless of aggregation settings. |
 | **Backend service is unreachable** | Extension fails silently without impacting the Wazuh dashboard. A non-intrusive status indicator shows the AI assist is unavailable. |
-| **Model produces a nonsensical summary** | The analyst dismisses it and proceeds manually. No downstream system depends on the AI output; it is advisory only. |
+| **SLM produces a low-confidence report** | Red confidence badges are displayed on affected sections. Analyst is advised to treat those sections with heightened skepticism and verify against raw logs. The report is still returned — the analyst decides whether it is useful. |
+| **Log volume exceeds SLM context window** | Pre-processing deduplication reduces volume first. If the cleaned event stream still exceeds context limits, the backend truncates to the highest-severity and most temporally significant events and notes the truncation in the report metadata. |
 
 ---
 
-## 8. Model Maintenance & Drift
+## 9. Model Maintenance & Drift
 
-Threat actor TTPs evolve. The SLM, once deployed, is a static artifact unless actively maintained. The following operational commitments address this:
+Threat actor TTPs evolve. The SLM, once deployed, is a static artifact unless actively maintained.
 
-- **Quarterly Model Review:** Every quarter, the SOC team reviews whether the AI summaries remain directionally accurate for the current threat landscape. If significant drift is detected, model replacement or supplementary prompt engineering is evaluated.
-- **Fine-Tuning (Optional, Phase 4):** If the SOC wishes to tune the model's output style to match internal reporting formats, a parameter-efficient fine-tune (LoRA) can be applied. This requires a curated dataset of several hundred to a few thousand high-quality analyst-written summaries and dedicated ML engineering time. This is an optional enhancement, not a launch requirement, and its scope should not be underestimated. It is listed as a Phase 4 activity with its own dedicated planning effort.
-- **Model Replacement:** The inference server is model-agnostic. As better open-weights models become available, swapping the underlying model requires no changes to the pipeline architecture.
+- **Quarterly Model Review:** Every quarter, the SOC team reviews whether the AI reports remain directionally accurate for the current threat landscape. If significant drift is detected, model replacement or prompt engineering adjustments are evaluated.
+- **Confidence Score Monitoring:** Sustained low confidence scores across reports are an early signal of model drift or data distribution shift. The development team monitors aggregate confidence score trends as a leading indicator.
+- **Fine-Tuning (Phase 4):** If the SOC wishes to tune the model's output style to match internal reporting formats, a parameter-efficient fine-tune (LoRA) can be applied. This requires a curated dataset of several hundred to a few thousand high-quality analyst-written reports and dedicated ML engineering time. This is an optional enhancement, not a launch requirement.
+- **Model Replacement:** The inference server is model-agnostic. As better open-weights models become available, swapping the underlying model requires no changes to the pipeline architecture, provided logprob support is confirmed for the replacement model.
 
 ---
 
-## 9. Compliance & Documentation
+## 10. Compliance & Documentation
 
 Even for a self-hosted, internal tool, AI-assisted security decisions require documentation in regulated environments.
 
-- All AI-generated summaries that correspond to a formal incident investigation are logged alongside the raw investigation record, making it auditable which investigations used AI assistance.
-- The audit log (see Section 5, Step 2) provides a complete record of what data was queried, by whom, and when.
+- All AI-generated reports that correspond to a formal incident investigation are logged alongside the raw investigation record, making it auditable which investigations used AI assistance.
+- Per-section confidence scores are included in the audit log, providing a record of the model's uncertainty at the time of generation.
 - Compliance documentation explicitly classifies this tool as an **analyst decision-support aid**, not an automated decision system, which carries a lower compliance burden under most frameworks (SOC 2, ISO 27001, GDPR).
 
 ---
 
-## 10. Implementation Strategy
+## 11. Implementation Strategy
 
-The project is executed in a modular, sequenced pipeline that validates each layer before building on top of it.
+**Phase 1 — Wazuh API & Data Pipeline:** Develop the backend service to authenticate with Wazuh, parse URL parameters from the Wazuh dashboard, query the API, and execute the pre-processing logic. Validate pipeline performance and output quality independently of the AI layer. Conduct break-even hardware cost analysis.
 
-1. **Phase 1 — Wazuh API & Data Pipeline:** Develop the backend service to authenticate with Wazuh, dynamically translate OpenSearch parameters from the browser, download logs in bulk, and execute the deduplication and aggregation logic. Validate pipeline performance and output quality independently of the AI layer. Conduct break-even hardware cost analysis.
+**Phase 2 — SLM Server Provisioning:** Procure and configure the internal GPU server. Deploy an open-weights SLM using vLLM (or equivalent inference engine confirmed to support logprob output). Establish the internal API endpoint. Validate logprob extraction and confidence score computation. Conduct load testing. Validate that the model produces directionally useful reports on representative SOC datasets.
 
-2. **Phase 2 — SLM Server Provisioning:** Procure and configure the internal GPU server. Deploy an open-weights SLM using vLLM. Establish the internal API endpoint. Conduct load testing against the performance targets in Section 6. Validate that the model produces directionally useful summaries on representative SOC datasets.
+**Phase 3 — Browser Extension Development:** Build the lightweight extension with the Capture button overlay, the inline Markdown viewer with confidence score badges, and the full-tab expansion view. Implement download options (MD, PDF, DOCX). Roll out to a pilot group of analysts for feedback.
 
-3. **Phase 3 — Browser Extension Development:** Build the lightweight extension. Implement mTLS communication with the backend. Enforce enterprise browser policy deployment. Conduct security review of extension permissions. Roll out to a pilot group of analysts for feedback.
-
-4. **Phase 4 — SOC Rollout, SOP Integration & Optional Tuning:** Deploy to the full analyst team with explicit SOP documentation establishing the assistive framing. Train analysts — particularly Level 1 — on appropriate use and the requirement to verify AI output against raw logs. If fine-tuning is pursued based on Phase 3 feedback, scope and resource it as a standalone project with proper ML engineering support.
+**Phase 4 — SOC Rollout, SOP Integration & Platform Expansion:** Deploy to the full analyst team with explicit SOP documentation. Train analysts on appropriate use and the requirement to verify AI output against raw logs. Extend URL parameter parsing to support Kibana and OpenSearch dashboards. If fine-tuning is pursued based on pilot feedback, scope it as a standalone project.
 
 ---
 
-## 11. Competitive Landscape & Differentiation
-
-The intersection of AI and SIEM is an active and rapidly maturing space. Understanding what already exists — and where this proposal sits relative to it — is essential for justifying the build decision.
+## 12. Competitive Landscape & Differentiation
 
 ### What Already Exists
 
-**Wazuh's Native LLM Integration:** Wazuh itself has begun moving in this direction, introducing LLM integration using models like LLaMA 3 running on Ollama combined with LangChain. This allows analysts to query logs using natural language through a chatbot embedded in the OpenSearch UI and receive context-rich responses.
+**Wazuh's Native LLM Integration:** Wazuh has begun introducing LLM integration using models like LLaMA 3 running on Ollama combined with LangChain, allowing analysts to query logs using natural language through a chatbot embedded in the OpenSearch UI.
 
-**Enterprise SIEM AI Assistants:** Vendors including Fortinet (Fortinet Advisor), Rapid7, Elastic, and Microsoft Sentinel have embedded AI assistants directly into their platforms. These provide alert triage, investigation summaries, and workflow recommendations. They are cloud-connected, subscription-priced, and built for their own proprietary platforms.
+**Enterprise SIEM AI Assistants:** Vendors including Fortinet, Rapid7, Elastic, and Microsoft Sentinel have embedded AI assistants directly into their platforms. These are cloud-connected, subscription-priced, and built for their own proprietary platforms.
 
 **Open Source Tools:** Projects like LogSentinelAI offer LLM-powered log analysis using declarative extraction schemas, with support for Elasticsearch/Kibana integration and local inference via Ollama and vLLM. These are pipeline tools, not workflow-integrated analyst aids.
 
 ### Where This Proposal Is Different
 
-Despite the crowded space, no existing solution matches this proposal's specific combination of properties. The differentiators are not marginal — they represent a fundamentally different design philosophy.
-
 | Dimension | Existing Solutions | This Proposal |
 | :--- | :--- | :--- |
-| **Workflow Integration** | Chatbot panels or separate tools requiring the analyst to switch context and type natural language queries | Captures the analyst's existing Wazuh filter state with one click — zero behavior change required |
-| **Privacy Architecture** | Cloud-connected AI (enterprise vendors) or opt-in local setup requiring significant infrastructure work (Wazuh native) | Self-hosted by design, hard architectural constraint from day one, not a configuration option |
-| **Interaction Model** | Query-based: analyst must formulate a question | Filter-based: analyst works natively in Wazuh, the tool translates their filter state automatically |
-| **Deployment Model** | Native platform feature (vendor lock-in) or standalone pipeline tool | Lightweight browser extension layered on top of any existing Wazuh deployment without modifying it |
-| **Target User** | Assumes analyst proficiency with AI prompting | Designed explicitly for Level 1 analysts who should not need to know how to prompt an LLM |
-| **Cost Model** | Per-seat SaaS subscription or significant self-hosted infrastructure investment | Fixed hardware cost, zero per-investigation cost at scale |
+| **Workflow Integration** | Chatbot panels requiring the analyst to formulate natural language queries | Captures the analyst's existing filter state with one click — zero behavior change |
+| **Privacy Architecture** | Cloud-connected AI or opt-in local setup | Self-hosted by design, hard architectural constraint from day one |
+| **Interaction Model** | Query-based: analyst must know what to ask | Filter-based: analyst works natively in Wazuh, tool translates filter state automatically |
+| **Output Format** | Free-form text or chat response | Structured MD report with defined sections and per-section confidence scores |
+| **Confidence Signal** | None, or self-reported by model | Token logprob-derived per-section score — mathematically honest |
+| **Deployment Model** | Native platform feature or standalone pipeline | Lightweight browser extension on any existing Wazuh deployment |
+| **Cost Model** | Per-seat SaaS or significant cloud spend | Fixed hardware cost, zero per-investigation cost at scale |
 
 ### The Core Differentiator
 
-The most significant gap this proposal fills is the **interaction model**. Every existing solution — including Wazuh's own native AI — requires the analyst to formulate a question. This places the cognitive burden of knowing *what to ask* on the analyst, which is circular: if the analyst already knows what to ask, they already have enough context to begin the investigation.
-
-This proposal inverts that model entirely. The analyst filters first — the thing they already know how to do — and the AI derives the question automatically from the filter state. The result is an AI assist that is genuinely useful to the analysts who need it most: those who are still building the pattern recognition to know where to look.
-
-### Market Window
-
-The space is consolidating quickly. Wazuh's native AI features, while currently requiring significant setup effort and relying on a query-based interaction model, will mature. The addressable window for a workflow-native, zero-friction alternative is estimated at 12–18 months before native platform features close the gap sufficiently to reduce the marginal value of a standalone tool. This makes early execution on Phase 1 and Phase 2 a strategic priority.
+The most significant gap this proposal fills is the **interaction model combined with honest uncertainty quantification**. Every existing solution requires the analyst to formulate a question and provides no reliable signal about how much to trust the output. This proposal inverts the interaction model entirely — the analyst filters, the AI derives — and adds logprob-based confidence scores that give the analyst a mathematically grounded basis for calibrating their reliance on each section of the report.
 
 ---
 
-## 12. Conclusion
+## 13. Conclusion
 
 This architecture represents a practical, privacy-respecting augmentation of how Level 1 and Level 2 SOC analysts orient themselves within large datasets. By being explicit about what the tool is — an AI-powered starting point, not an AI-powered verdict — we avoid the most common failure mode of security AI tooling: eroding analyst judgment rather than sharpening it.
 
-The pipeline is self-contained, auditable, and operationally resilient. It respects data sovereignty, replaces unpredictable API spend with fixed infrastructure cost, and integrates into the workflow analysts already use. Most importantly, it is designed to make skilled analysts faster, not to substitute for them.
+The structured report format, the logprob-based confidence scoring, and the assistive framing work together to produce a tool that analysts can trust precisely because it is honest about its own uncertainty. A red confidence badge is not a failure — it is the tool doing its job correctly.
+
+The pipeline is self-contained, auditable, and operationally resilient. It respects data sovereignty, replaces unpredictable API spend with fixed infrastructure cost, and integrates into the workflow analysts already use. Most importantly, it is designed to make skilled analysts faster — not to substitute for them.
