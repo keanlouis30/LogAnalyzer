@@ -1,0 +1,23 @@
+# 1 - Security Teams Are Drowning in Data and Paperwork
+
+Security teams are drowning in a sea of data and paperwork, leading to critical delays and massive costs. We're talking about an average of 158 days to identify a breach, costing companies nearly $5 million. This isn't just about efficiency; it's about fundamental security posture. SOC analysts spend hours manually sifting through logs, and pentesters lose valuable time reconstructing reports from memory. The expertise is there, but the tools to document and leverage it are not. We've identified a critical gap where human skill is hampered by a lack of proper documentation infrastructure. This problem is pervasive, expensive, and it's ripe for a solution. So, how do we fix this without disrupting existing workflows?
+
+# 2 - One Extension. Two Tools. Zero Workflow Change.
+
+We solve this with a single browser extension that integrates seamlessly into existing workflows, requiring zero changes from your team. This isn't another SaaS platform; it's a self-hosted solution, ensuring all data stays within your network, powered by a local Small Language Model. For SOC analysts, it's as simple as filtering in Wazuh, clicking 'Capture,' and instantly receiving a structured Markdown report. For pentesters, they simply tap a dropdown to confirm attacks during an engagement, and the full report is generated automatically at the session's end. Every report section comes with a mathematically honest confidence score, so you always know the reliability of the information. This means immediate value, minimal friction, and maximum security. But who exactly benefits from this streamlined approach?
+
+# 3 - Built for the People Who Actually Do the Work
+
+This product is built for the people who are actually doing the work, from the front lines to the executive suite. For L1/L2 SOC analysts, an alert at 2 AM no longer means sifting through endless JSON; they get a structured report with hypotheses and remediation steps in seconds. Penetration testers can focus on the engagement, confirming attacks with a quick tap, and reducing report writing from hours to minutes. Red Team Leads and MSSPs gain consistent report quality across all engagements, with built-in audit evidence for compliance. And for Security Managers and CISOs, this tool is a decision-support aid, not an automated decision system, which significantly lowers compliance burdens. We're empowering your team, not replacing them. Now, let's look at how this truly differentiates us in the market.
+
+# 4 - The Gap Nobody Has Filled
+
+We've shown how our product solves critical problems for security teams. Now, let's look at why no one else has filled this gap. Our solution stands apart by demanding zero workflow changes, keeping humans in control, and providing honest confidence signals. Existing tools often force new interfaces or replace human expertise, which just doesn't work. We also guarantee data privacy, a non-negotiable for security operations. And our fixed-cost model avoids the per-seat SaaS trap. This matters because human-led work is irreplaceable, uncovering vastly more vulnerabilities than automated scans. The pentest market is booming, yet this critical documentation problem remains unsolved. We're uniquely positioned to capture this segment. Let's talk about how we get there.
+
+# 5 - The Architecture Is Decided. The Build Starts with Validation.
+
+So, we've identified a clear market need and a unique solution. Our architecture is decided, and the next step is a focused validation. We start with a single, critical question: can we generate a useful report from real engagement data? This one-day validation phase is low-risk, high-reward. If successful, we move to building the shared backend infrastructure, then deploy our self-hosted SLM layer. After that, we develop the browser extension and pilot it with real users. Our core principles guide every step: assistive, not authoritative; zero data exfiltration; and honest about uncertainty. This phased approach ensures we build the right product, efficiently. And now, let's look at the data that grounds our strategy.
+
+# 6 - References and Data Sources
+
+All our claims are backed by solid data from reputable sources. We've highlighted the critical metrics that underscore the urgency of our solution. From the average time to identify a breach to the escalating cost of data breaches, the problem is clear. The growth of the pentest market and the proven value of manual testing further validate our focus. These statistics aren't just numbers; they represent the daily challenges and financial impact faced by security teams. Our solution directly addresses these pain points, offering a path to better security outcomes. Thank you.
